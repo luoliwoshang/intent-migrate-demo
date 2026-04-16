@@ -15,10 +15,27 @@ const MESSAGE_ROLES = {
 };
 
 const TOOL_NAMES = {
+  BOOK_RESTAURANT_TABLE: "book_restaurant_table",
   CHECK_SUPERMARKET_STOCK: "check_supermarket_stock",
   CONTINUE_CHAT: "continue_chat",
   GET_TIME: "get_time",
   GET_WEATHER: "get_weather",
+  QUERY_ASYNC_TASK_STATUS: "query_async_task_status",
+};
+
+const LEGACY_TOOL_NAMES = {
+  CHECK_RESTAURANT_WAIT_TIME: "check_restaurant_wait_time",
+};
+
+const FORM_KEYS = {
+  TOOL_ENABLED_RESTAURANT_BOOKING: "toolEnabledRestaurantBooking",
+  TOOL_ENABLED_WEATHER: "toolEnabledWeather",
+  TOOL_ENABLED_TIME: "toolEnabledTime",
+  TOOL_ENABLED_SUPERMARKET_STOCK: "toolEnabledSupermarketStock",
+};
+
+const LEGACY_FORM_KEYS = {
+  TOOL_ENABLED_RESTAURANT_WAIT_TIME: "toolEnabledRestaurantWaitTime",
 };
 
 const ASYNC_TASK_STATUS = {
@@ -37,8 +54,8 @@ const ASYNC_TASK_STATUS_LABELS = {
   [ASYNC_TASK_STATUS.NOTIFIED]: "已通知",
 };
 
-const ASYNC_TASK_STEP_DELAY_MS = 3000;
-const ASYNC_TASK_UPDATES = [
+const ASYNC_TASK_STEP_DELAY_MS = 20000;
+const SUPERMARKET_TASK_UPDATES = [
   {
     status: ASYNC_TASK_STATUS.PROCESSING,
     progress: 42,
@@ -48,6 +65,34 @@ const ASYNC_TASK_UPDATES = [
     status: ASYNC_TASK_STATUS.FINALIZING,
     progress: 78,
     message: "已经拿到超市回复，正在整理门店、库存和下一步建议。",
+  },
+];
+
+const RESTAURANT_BOOKING_TASK_UPDATES = [
+  {
+    status: ASYNC_TASK_STATUS.PROCESSING,
+    progress: 24,
+    message: "正在查阅电话簿，确认餐厅联系方式。",
+  },
+  {
+    status: ASYNC_TASK_STATUS.PROCESSING,
+    progress: 42,
+    message: "正在拨打电话，尝试联系餐厅前台。",
+  },
+  {
+    status: ASYNC_TASK_STATUS.PROCESSING,
+    progress: 58,
+    message: "电话暂时还没接通，正在重拨。",
+  },
+  {
+    status: ASYNC_TASK_STATUS.FINALIZING,
+    progress: 78,
+    message: "已经接通电话，正在沟通订座信息。",
+  },
+  {
+    status: ASYNC_TASK_STATUS.FINALIZING,
+    progress: 92,
+    message: "沟通完毕，正在整理订座答复。",
   },
 ];
 
@@ -78,23 +123,27 @@ const PERSISTED_FORM_KEYS = [
   "intentApiKey",
   "intentModel",
   "intentSystemPrompt",
-  "toolEnabledWeather",
-  "toolEnabledTime",
-  "toolEnabledSupermarketStock",
+  FORM_KEYS.TOOL_ENABLED_RESTAURANT_BOOKING,
+  FORM_KEYS.TOOL_ENABLED_WEATHER,
+  FORM_KEYS.TOOL_ENABLED_TIME,
+  FORM_KEYS.TOOL_ENABLED_SUPERMARKET_STOCK,
   "toolResponseMode",
 ];
 
 const INTENT_TOOL_SWITCH_KEYS = {
-  [TOOL_NAMES.GET_WEATHER]: "toolEnabledWeather",
-  [TOOL_NAMES.GET_TIME]: "toolEnabledTime",
-  [TOOL_NAMES.CHECK_SUPERMARKET_STOCK]: "toolEnabledSupermarketStock",
+  [TOOL_NAMES.BOOK_RESTAURANT_TABLE]: FORM_KEYS.TOOL_ENABLED_RESTAURANT_BOOKING,
+  [TOOL_NAMES.GET_WEATHER]: FORM_KEYS.TOOL_ENABLED_WEATHER,
+  [TOOL_NAMES.GET_TIME]: FORM_KEYS.TOOL_ENABLED_TIME,
+  [TOOL_NAMES.CHECK_SUPERMARKET_STOCK]: FORM_KEYS.TOOL_ENABLED_SUPERMARKET_STOCK,
 };
 
 function getEnabledIntentToolNames(form) {
   return [
-    form.toolEnabledWeather ? TOOL_NAMES.GET_WEATHER : null,
-    form.toolEnabledTime ? TOOL_NAMES.GET_TIME : null,
-    form.toolEnabledSupermarketStock ? TOOL_NAMES.CHECK_SUPERMARKET_STOCK : null,
+    form[FORM_KEYS.TOOL_ENABLED_RESTAURANT_BOOKING] ? TOOL_NAMES.BOOK_RESTAURANT_TABLE : null,
+    form[FORM_KEYS.TOOL_ENABLED_WEATHER] ? TOOL_NAMES.GET_WEATHER : null,
+    form[FORM_KEYS.TOOL_ENABLED_TIME] ? TOOL_NAMES.GET_TIME : null,
+    form[FORM_KEYS.TOOL_ENABLED_SUPERMARKET_STOCK] ? TOOL_NAMES.CHECK_SUPERMARKET_STOCK : null,
+    TOOL_NAMES.QUERY_ASYNC_TASK_STATUS,
     TOOL_NAMES.CONTINUE_CHAT,
   ].filter(Boolean);
 }
@@ -109,17 +158,17 @@ function buildDefaultIntentSystemPrompt(formLike) {
     "绝对不要输出自然语言解释。",
   ];
 
-  if (formLike.toolEnabledWeather) {
+  if (formLike[FORM_KEYS.TOOL_ENABLED_WEATHER]) {
     lines.push(`如果用户在问天气，优先调用 ${TOOL_NAMES.GET_WEATHER}。`);
     lines.push("示例：用户说“上海天气怎么样”时，应该调用 get_weather。");
   }
 
-  if (formLike.toolEnabledTime) {
+  if (formLike[FORM_KEYS.TOOL_ENABLED_TIME]) {
     lines.push(`如果用户在问当前时间、日期、星期，优先调用 ${TOOL_NAMES.GET_TIME}。`);
     lines.push("示例：用户说“现在几点了”时，应该调用 get_time。");
   }
 
-  if (formLike.toolEnabledSupermarketStock) {
+  if (formLike[FORM_KEYS.TOOL_ENABLED_SUPERMARKET_STOCK]) {
     lines.push(
       `如果用户要求查询超市有没有货、某个商品有没有现货、附近超市能不能买到某个东西，必须调用 ${TOOL_NAMES.CHECK_SUPERMARKET_STOCK}。`,
     );
@@ -135,6 +184,38 @@ function buildDefaultIntentSystemPrompt(formLike) {
     );
   }
 
+  if (formLike[FORM_KEYS.TOOL_ENABLED_RESTAURANT_BOOKING]) {
+    lines.push(
+      `如果用户要求订餐厅、预约座位、帮忙订今晚或明天某个时间几个人的位置，必须调用 ${TOOL_NAMES.BOOK_RESTAURANT_TABLE}。`,
+    );
+    lines.push(
+      `即使用户没有说清楚完整店名，只要核心诉求是“帮我订餐厅位置”，也必须调用 ${TOOL_NAMES.BOOK_RESTAURANT_TABLE}，参数可以留空或只填写部分字段。`,
+    );
+    lines.push("不要把“帮我订一下今晚 7 点两个人的烤肉店”“给那家火锅店约个明晚的位置”误判成 continue_chat。");
+    lines.push(
+      "示例：用户说“帮我订一下今晚 7 点两个人的烤肉店”时，应该调用 book_restaurant_table，并尽量提取 restaurant、time、party_size。",
+    );
+    lines.push(
+      "示例：用户说“给那家火锅店约个明晚的位置”时，应该调用 book_restaurant_table。",
+    );
+  }
+
+  lines.push(
+    `如果用户在追问异步任务的进度、状态或结果，例如“刚才那个查好了没”“进度怎么样”“有结果了吗”，必须调用 ${TOOL_NAMES.QUERY_ASYNC_TASK_STATUS}。`,
+  );
+  lines.push(
+    `命中 ${TOOL_NAMES.QUERY_ASYNC_TASK_STATUS} 后，编排层会直接汇总当前所有异步任务状态，不需要追问用户具体是哪一个任务。`,
+  );
+  lines.push(
+    "示例：用户说“刚才那个查好了没”时，应该调用 query_async_task_status。",
+  );
+  lines.push(
+    "示例：用户说“超市那个现在什么进度”时，应该调用 query_async_task_status。",
+  );
+  lines.push(
+    "示例：用户说“现在任务进度怎么样”时，应该调用 query_async_task_status。",
+  );
+
   lines.push(
     `只有在明确不是已启用的任务能力，也没有明显任务型诉求时，才调用 ${TOOL_NAMES.CONTINUE_CHAT}。`,
   );
@@ -144,9 +225,10 @@ function buildDefaultIntentSystemPrompt(formLike) {
 }
 
 const DEFAULT_INTENT_SYSTEM_PROMPT = buildDefaultIntentSystemPrompt({
-  toolEnabledWeather: true,
-  toolEnabledTime: true,
-  toolEnabledSupermarketStock: true,
+  [FORM_KEYS.TOOL_ENABLED_RESTAURANT_BOOKING]: true,
+  [FORM_KEYS.TOOL_ENABLED_WEATHER]: true,
+  [FORM_KEYS.TOOL_ENABLED_TIME]: true,
+  [FORM_KEYS.TOOL_ENABLED_SUPERMARKET_STOCK]: true,
 });
 
 const DEFAULT_FORM = {
@@ -164,14 +246,41 @@ const DEFAULT_FORM = {
   intentApiKey: "",
   intentModel: "gpt-5.4",
   intentSystemPrompt: DEFAULT_INTENT_SYSTEM_PROMPT,
-  toolEnabledWeather: true,
-  toolEnabledTime: true,
-  toolEnabledSupermarketStock: true,
+  [FORM_KEYS.TOOL_ENABLED_RESTAURANT_BOOKING]: true,
+  [FORM_KEYS.TOOL_ENABLED_WEATHER]: true,
+  [FORM_KEYS.TOOL_ENABLED_TIME]: true,
+  [FORM_KEYS.TOOL_ENABLED_SUPERMARKET_STOCK]: true,
   toolResponseMode: TOOL_RESPONSE_MODES.REQLLM,
   userInput: "帮我查一下附近超市有没有无糖酸奶",
 };
 
 const INTENT_TOOL_DEFINITIONS = {
+  [TOOL_NAMES.BOOK_RESTAURANT_TABLE]: {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.BOOK_RESTAURANT_TABLE,
+      description:
+        "预订餐厅座位。凡是用户要求订座、预约位置、帮忙订今晚或明天某个时间几个人的位置，都应该优先命中这个工具。",
+      parameters: {
+        type: "object",
+        properties: {
+          restaurant: {
+            type: "string",
+            description: "用户提到的餐厅名称，例如海底捞、西塔老太太、楼下那家烤肉店。",
+          },
+          party_size: {
+            type: "string",
+            description: "订座人数，例如 2 人、4 位。",
+          },
+          time: {
+            type: "string",
+            description: "订座时间，例如今晚 7 点、明天中午 12 点半。",
+          },
+        },
+        required: [],
+      },
+    },
+  },
   [TOOL_NAMES.GET_WEATHER]: {
     type: "function",
     function: {
@@ -223,11 +332,24 @@ const INTENT_TOOL_DEFINITIONS = {
       },
     },
   },
+  [TOOL_NAMES.QUERY_ASYNC_TASK_STATUS]: {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.QUERY_ASYNC_TASK_STATUS,
+      description:
+        "查询异步任务状态。适用于询问刚才那个任务的进度、结果、有没有查好、现在什么情况等追问。命中后应直接汇总当前所有异步任务状态。",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+    },
+  },
   [TOOL_NAMES.CONTINUE_CHAT]: {
     type: "function",
     function: {
       name: TOOL_NAMES.CONTINUE_CHAT,
-      description: "仅当用户没有提出天气、时间、超市查货等明确任务需求时，继续正常聊天。",
+      description: "仅当用户没有提出天气、时间、超市查货、餐厅订座等明确任务需求时，继续正常聊天。",
       parameters: {
         type: "object",
         properties: {},
@@ -357,10 +479,30 @@ function buildStoredForm() {
     return DEFAULT_FORM;
   }
 
-  return {
+  const nextForm = {
     ...DEFAULT_FORM,
     ...parsed,
   };
+
+  if (
+    LEGACY_FORM_KEYS.TOOL_ENABLED_RESTAURANT_WAIT_TIME in parsed &&
+    !(FORM_KEYS.TOOL_ENABLED_RESTAURANT_BOOKING in parsed)
+  ) {
+    nextForm[FORM_KEYS.TOOL_ENABLED_RESTAURANT_BOOKING] =
+      parsed[LEGACY_FORM_KEYS.TOOL_ENABLED_RESTAURANT_WAIT_TIME];
+  }
+
+  if (
+    typeof nextForm.intentSystemPrompt === "string" &&
+    (
+      nextForm.intentSystemPrompt.includes(LEGACY_TOOL_NAMES.CHECK_RESTAURANT_WAIT_TIME) ||
+      nextForm.intentSystemPrompt.includes("餐厅等位")
+    )
+  ) {
+    nextForm.intentSystemPrompt = DEFAULT_INTENT_SYSTEM_PROMPT;
+  }
+
+  return nextForm;
 }
 
 function persistForm(form) {
@@ -750,6 +892,85 @@ function guessSupermarketStore(userMessage) {
   return "附近超市";
 }
 
+function guessRestaurantName(userMessage) {
+  const cleaned = userMessage
+    .replace(/[，。！？,.!?]/g, " ")
+    .replace(
+      /帮我|帮忙|请|订一下|订个|预约|约个|订座|定座|订位|定位|餐厅|饭店|店家|今晚|明天|今天|后天|中午|晚上|下午|上午|几位|位子|位置|桌|个位置|个人|人/gi,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (cleaned) {
+    return cleaned;
+  }
+
+  return "巷口烤肉店";
+}
+
+const PARTY_SIZE_NUMBER_MAP = {
+  一: "1",
+  二: "2",
+  两: "2",
+  俩: "2",
+  三: "3",
+  四: "4",
+  五: "5",
+  六: "6",
+  七: "7",
+  八: "8",
+  九: "9",
+  十: "10",
+};
+
+function normalizePartySizeToken(token) {
+  if (!token) {
+    return "";
+  }
+
+  if (/^\d+$/.test(token)) {
+    return token;
+  }
+
+  return PARTY_SIZE_NUMBER_MAP[token] || "";
+}
+
+function guessRestaurantPartySize(userMessage) {
+  const directMatch = userMessage.match(/(\d+|[一二两俩三四五六七八九十])\s*(位|个人|人)/);
+  if (directMatch) {
+    const value = normalizePartySizeToken(directMatch[1]);
+    if (value) {
+      return `${value} 人`;
+    }
+  }
+
+  return "2 人";
+}
+
+function guessRestaurantReservationTime(userMessage) {
+  const explicitMatch = userMessage.match(
+    /((?:今天|今晚|明天|后天)?\s*(?:上午|中午|下午|晚上)?\s*\d{1,2}\s*点(?:半|[0-5]?\d分)?)/,
+  );
+  if (explicitMatch?.[1]) {
+    return explicitMatch[1].replace(/\s+/g, " ").trim();
+  }
+
+  if (userMessage.includes("明天")) {
+    return "明天晚上 7 点";
+  }
+
+  if (userMessage.includes("中午")) {
+    return "今天中午 12 点";
+  }
+
+  if (userMessage.includes("晚上")) {
+    return "今晚 7 点";
+  }
+
+  return "今晚 7 点";
+}
+
 function createTaskEvent(status, progress, message) {
   return {
     id: crypto.randomUUID(),
@@ -776,7 +997,49 @@ function buildSupermarketTask(decision, userMessage) {
     id: crypto.randomUUID(),
     intent: TOOL_NAMES.CHECK_SUPERMARKET_STOCK,
     item,
+    request: userMessage,
     store,
+    title: item,
+    subtitle: store,
+    matchTexts: [item, store, userMessage],
+    progressUpdates: SUPERMARKET_TASK_UPDATES,
+    status: ASYNC_TASK_STATUS.ACCEPTED,
+    progress: 12,
+    currentMessage: acceptedMessage,
+    updates: [createTaskEvent(ASYNC_TASK_STATUS.ACCEPTED, 12, acceptedMessage)],
+    result: "",
+    pendingMerge: false,
+    createdAt: Date.now(),
+  };
+}
+
+function buildRestaurantBookingTask(decision, userMessage) {
+  const restaurant =
+    typeof decision.arguments.restaurant === "string" && decision.arguments.restaurant.trim()
+      ? decision.arguments.restaurant.trim()
+      : guessRestaurantName(userMessage);
+  const partySize =
+    typeof decision.arguments.party_size === "string" && decision.arguments.party_size.trim()
+      ? decision.arguments.party_size.trim()
+      : guessRestaurantPartySize(userMessage);
+  const reservationTime =
+    typeof decision.arguments.time === "string" && decision.arguments.time.trim()
+      ? decision.arguments.time.trim()
+      : guessRestaurantReservationTime(userMessage);
+
+  const acceptedMessage = "已接受餐厅订座请求，开始查阅餐厅联系方式。";
+
+  return {
+    id: crypto.randomUUID(),
+    intent: TOOL_NAMES.BOOK_RESTAURANT_TABLE,
+    restaurant,
+    partySize,
+    reservationTime,
+    request: userMessage,
+    title: restaurant,
+    subtitle: `订座 · ${reservationTime} · ${partySize}`,
+    matchTexts: [restaurant, reservationTime, partySize, userMessage],
+    progressUpdates: RESTAURANT_BOOKING_TASK_UPDATES,
     status: ASYNC_TASK_STATUS.ACCEPTED,
     progress: 12,
     currentMessage: acceptedMessage,
@@ -828,6 +1091,175 @@ function buildSupermarketNotification(task) {
   ].join("\n");
 }
 
+function buildRestaurantBookingResult(task) {
+  return [
+    `${task.restaurant} 已经帮你订好了。`,
+    `订座时间是 ${task.reservationTime}，人数是 ${task.partySize}。`,
+    "餐厅前台说会保留 15 分钟，建议准时到店。",
+    "要我继续帮你问停车、地址，或者顺手再订别的餐厅吗？",
+  ].join("\n");
+}
+
+function buildRestaurantBookingDispatchPayload(form, targetMessages, task) {
+  return {
+    model: form.model.trim(),
+    messages: [
+      ...buildVisibleConversation(targetMessages, form.systemPrompt),
+      {
+        role: MESSAGE_ROLES.SYSTEM,
+        content: [
+          "你识别到用户想预约餐厅座位。",
+          "真正的完整订座结果会由后台异步任务生成。",
+          "你当前只能给出一条同步确认回复，不要直接编造订座结果。",
+          `restaurant: ${task.restaurant}`,
+          `party_size: ${task.partySize}`,
+          `time: ${task.reservationTime}`,
+          "请用自然中文在两句以内告诉用户：你已经接到任务，正在联系餐厅确认订座，稍后会把结果带回来。",
+        ].join("\n"),
+      },
+    ],
+    max_tokens: Number(form.maxTokens || 256),
+    temperature: Number(form.temperature || 0.2),
+    stream: form.stream,
+  };
+}
+
+function buildRestaurantBookingNotification(task) {
+  return [
+    `关于你刚才让我订的餐厅位置，我已经处理好了。`,
+    `餐厅：${task.restaurant}，时间：${task.reservationTime}，人数：${task.partySize}。`,
+    "",
+    task.result,
+  ].join("\n");
+}
+
+function buildAsyncTaskResult(task) {
+  if (task.intent === TOOL_NAMES.BOOK_RESTAURANT_TABLE) {
+    return buildRestaurantBookingResult(task);
+  }
+  return buildSupermarketResult(task);
+}
+
+function buildAsyncTaskDispatchPayload(form, targetMessages, task) {
+  if (task.intent === TOOL_NAMES.BOOK_RESTAURANT_TABLE) {
+    return buildRestaurantBookingDispatchPayload(form, targetMessages, task);
+  }
+  return buildSupermarketDispatchPayload(form, targetMessages, task);
+}
+
+function buildAsyncTaskNotification(task) {
+  if (task.intent === TOOL_NAMES.BOOK_RESTAURANT_TABLE) {
+    return buildRestaurantBookingNotification(task);
+  }
+  return buildSupermarketNotification(task);
+}
+
+function buildBatchNotificationPayload(form, tasks) {
+  const messages = [];
+
+  if (form.systemPrompt.trim()) {
+    messages.push({
+      role: MESSAGE_ROLES.SYSTEM,
+      content: form.systemPrompt.trim(),
+    });
+  }
+
+  messages.push({
+    role: MESSAGE_ROLES.SYSTEM,
+    content: [
+      "你正在为灵矽整理多条已完成的异步任务结果。",
+      "请把这些任务结果合并成一条自然、简短、不重复的中文 assistant 回复。",
+      "需要让用户知道每个任务分别查到了什么。",
+      "不要逐条编号。",
+      "不要重复说很多次“我查到了”。",
+      "如果多个任务有相似的下一步动作，只保留一个统一追问。",
+      "只输出最终要对用户说的话。",
+      "tasks:",
+      JSON.stringify(
+        tasks.map((task) => ({
+          task_id: task.id,
+          intent: task.intent,
+          request: task.request,
+          title: task.title,
+          subtitle: task.subtitle,
+          summary: task.result,
+        })),
+        null,
+        2,
+      ),
+    ].join("\n"),
+  });
+
+  messages.push({
+    role: MESSAGE_ROLES.USER,
+    content: "请把这些异步任务结果合并成一条回复。",
+  });
+
+  return {
+    model: form.model.trim(),
+    messages,
+    max_tokens: Number(form.maxTokens || 256),
+    temperature: Number(form.temperature || 0.2),
+    stream: false,
+  };
+}
+
+function getSortedAsyncTasks(tasks) {
+  return [...tasks].sort((left, right) => {
+    const leftNotified = left.status === ASYNC_TASK_STATUS.NOTIFIED ? 1 : 0;
+    const rightNotified = right.status === ASYNC_TASK_STATUS.NOTIFIED ? 1 : 0;
+    if (leftNotified !== rightNotified) {
+      return leftNotified - rightNotified;
+    }
+    return (right.createdAt || 0) - (left.createdAt || 0);
+  });
+}
+
+function buildAsyncTaskCompletionDigest(task) {
+  if (task.intent === TOOL_NAMES.BOOK_RESTAURANT_TABLE) {
+    return `已经订好 ${task.reservationTime} 的 ${task.partySize}，餐厅会保留 15 分钟。`;
+  }
+
+  return `${task.store} 目前还有现货，货架上大约还剩 6 件。`;
+}
+
+function buildAsyncTaskStatusLine(task, index) {
+  const prefix = `${index + 1}. ${task.title}（${task.subtitle}）`;
+  const statusLabel = ASYNC_TASK_STATUS_LABELS[task.status];
+
+  if (task.status === ASYNC_TASK_STATUS.COMPLETED) {
+    return `${prefix}：${statusLabel}，${buildAsyncTaskCompletionDigest(task)}`;
+  }
+
+  if (task.status === ASYNC_TASK_STATUS.NOTIFIED) {
+    return `${prefix}：${statusLabel}，${buildAsyncTaskCompletionDigest(task)}`;
+  }
+
+  return `${prefix}：${statusLabel}，${task.currentMessage}`;
+}
+
+function buildAsyncTaskStatusQueryResponse(tasks) {
+  const sortedTasks = getSortedAsyncTasks(tasks);
+  if (sortedTasks.length === 0) {
+    return {
+      content: "我这边暂时没有正在追踪的异步任务，所以现在没有可汇报的进度。",
+      taskIdsToMarkNotified: [],
+    };
+  }
+
+  const taskIdsToMarkNotified = sortedTasks
+    .filter((task) => task.status === ASYNC_TASK_STATUS.COMPLETED)
+    .map((task) => task.id);
+
+  return {
+    content: [
+      `我这边当前一共在跟踪 ${sortedTasks.length} 个异步任务，状态如下：`,
+      ...sortedTasks.map((task, index) => buildAsyncTaskStatusLine(task, index)),
+    ].join("\n"),
+    taskIdsToMarkNotified,
+  };
+}
+
 function buildIntentMessage(decision) {
   if (decision.source === "fallback") {
     return "前置 intent 没有返回可解析的结构化工具选择，前端降级为 continue_chat。";
@@ -841,6 +1273,14 @@ function buildIntentMessage(decision) {
     return `前置 intent 命中 ${decision.name}，编排层将它路由为异步超市查货任务，参数：${stringifyArguments(decision.arguments)}`;
   }
 
+  if (decision.name === TOOL_NAMES.BOOK_RESTAURANT_TABLE) {
+    return `前置 intent 命中 ${decision.name}，编排层将它路由为异步餐厅订座任务，参数：${stringifyArguments(decision.arguments)}`;
+  }
+
+  if (decision.name === TOOL_NAMES.QUERY_ASYNC_TASK_STATUS) {
+    return "前置 intent 命中 query_async_task_status，将直接查询本地异步任务队列并汇总所有任务状态。";
+  }
+
   return `前置 intent 命中 ${decision.name}，参数：${stringifyArguments(decision.arguments)}`;
 }
 
@@ -851,6 +1291,14 @@ function formatStatusFromDecision(decision) {
 
   if (decision.name === TOOL_NAMES.CHECK_SUPERMARKET_STOCK) {
     return "命中 check_supermarket_stock，当前轮会先同步确认，查货结果转为异步任务并实时展示进度。";
+  }
+
+  if (decision.name === TOOL_NAMES.BOOK_RESTAURANT_TABLE) {
+    return "命中 book_restaurant_table，当前轮会先同步确认，餐厅订座结果转为异步任务并实时展示进度。";
+  }
+
+  if (decision.name === TOOL_NAMES.QUERY_ASYNC_TASK_STATUS) {
+    return "命中 query_async_task_status，将直接汇总当前异步任务队列里的所有任务状态。";
   }
 
   return `命中 ${decision.name}，前端 mock tool 会固定等待 ${TOOL_DELAY_MS / 1000} 秒后返回。`;
@@ -866,7 +1314,7 @@ export default function App() {
   const [status, setStatus] = useState({
     kind: "warning",
     title: "等待测试",
-    text: "默认按灵矽当前主路径模拟：前置 intent 判工具，时间/天气同步返回；如果命中 check_supermarket_stock，则由编排层转成异步任务，等同步回复结束后再把查货结果合流进下一条消息。",
+    text: "默认按灵矽当前主路径模拟：前置 intent 判工具，时间/天气同步返回；如果命中 check_supermarket_stock 或 book_restaurant_table，则由编排层转成异步任务，等同步回复结束后再把结果合流进下一条消息。",
   });
   const chatListRef = useRef(null);
   const messagesRef = useRef(messages);
@@ -905,9 +1353,10 @@ export default function App() {
       };
     });
   }, [
-    form.toolEnabledWeather,
-    form.toolEnabledTime,
-    form.toolEnabledSupermarketStock,
+    form[FORM_KEYS.TOOL_ENABLED_RESTAURANT_BOOKING],
+    form[FORM_KEYS.TOOL_ENABLED_WEATHER],
+    form[FORM_KEYS.TOOL_ENABLED_TIME],
+    form[FORM_KEYS.TOOL_ENABLED_SUPERMARKET_STOCK],
   ]);
 
   function updateForm(key, value) {
@@ -1001,7 +1450,7 @@ export default function App() {
       return;
     }
 
-    const notification = buildSupermarketNotification(currentTask);
+    const notification = buildAsyncTaskNotification(currentTask);
     setMessages((current) => [
       ...current,
       {
@@ -1014,7 +1463,7 @@ export default function App() {
       taskId,
       ASYNC_TASK_STATUS.NOTIFIED,
       100,
-      "查货结果已作为下一条 assistant 消息通知给用户。",
+      "异步任务结果已作为下一条 assistant 消息通知给用户。",
       {
         pendingMerge: false,
         notifiedAt: Date.now(),
@@ -1022,23 +1471,97 @@ export default function App() {
     );
   }
 
-  function maybeFlushAsyncTaskNotifications() {
+  async function flushAsyncTaskBatchNotification(taskIds) {
+    const tasks = taskIds
+      .map((taskId) => getAsyncTaskById(taskId))
+      .filter((task) => task && task.result && task.status !== ASYNC_TASK_STATUS.NOTIFIED);
+
+    if (tasks.length <= 1) {
+      return;
+    }
+
+    const requestConfig = toMainRequestConfig(form);
+    const payload = buildBatchNotificationPayload(form, tasks);
+    appendRawOutput(
+      `----- async batch notification request -----\n${JSON.stringify(payload, null, 2)}`,
+    );
+
+    syncTurnInFlightRef.current = true;
+    try {
+      const response = await requestWithConfig(
+        requestConfig,
+        ENDPOINTS.CHAT_COMPLETIONS,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      );
+      const text = await response.text();
+      appendRawOutput(`----- async batch notification response -----\n${text}`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const parsed = safeParseJson(text, {});
+      const content = extractAssistantText(parsed) || "[empty response]";
+      setMessages((current) => [
+        ...current,
+        {
+          role: MESSAGE_ROLES.ASSISTANT,
+          content,
+        },
+      ]);
+
+      for (const task of tasks) {
+        updateAsyncTask(
+          task.id,
+          ASYNC_TASK_STATUS.NOTIFIED,
+          100,
+          "已通过批量汇总消息通知给用户。",
+          {
+            pendingMerge: false,
+            notifiedAt: Date.now(),
+          },
+        );
+      }
+
+      setStatusBox(
+        "ok",
+        "异步任务已合并通知",
+        `已将 ${tasks.length} 条异步结果合并成一条 assistant 消息。`,
+      );
+    } catch (error) {
+      appendRawOutput(`[error] ${humanizeError(error)}`);
+      setStatusBox("error", "异步任务合并失败", humanizeError(error));
+    } finally {
+      syncTurnInFlightRef.current = false;
+    }
+  }
+
+  async function maybeFlushAsyncTaskNotifications() {
     if (syncTurnInFlightRef.current) {
       return;
     }
 
-    const readyTaskIds = asyncTasksRef.current
+    const readyTasks = asyncTasksRef.current
       .filter((task) => task.result && task.status !== ASYNC_TASK_STATUS.NOTIFIED)
-      .sort((left, right) => (left.completedAt || left.createdAt) - (right.completedAt || right.createdAt))
-      .map((task) => task.id);
+      .sort((left, right) => (left.completedAt || left.createdAt) - (right.completedAt || right.createdAt));
 
-    for (const taskId of readyTaskIds) {
-      flushAsyncTaskNotification(taskId);
+    if (readyTasks.length === 0) {
+      return;
     }
+
+    if (readyTasks.length === 1) {
+      flushAsyncTaskNotification(readyTasks[0].id);
+      return;
+    }
+
+    await flushAsyncTaskBatchNotification(readyTasks.map((task) => task.id));
   }
 
   async function runAsyncTaskLifecycle(task) {
-    for (const step of ASYNC_TASK_UPDATES) {
+    for (const step of task.progressUpdates || []) {
       await sleep(ASYNC_TASK_STEP_DELAY_MS);
       const latestTask = getAsyncTaskById(task.id);
       if (!latestTask) {
@@ -1053,13 +1576,13 @@ export default function App() {
       return;
     }
 
-    const result = buildSupermarketResult(latestTask);
+    const result = buildAsyncTaskResult(latestTask);
     handleAsyncTaskStatusCallback(task.id, {
       status: ASYNC_TASK_STATUS.COMPLETED,
       progress: 100,
       message: syncTurnInFlightRef.current
-        ? "查货结果已经整理好，等待当前同步回复结束后再通知用户。"
-        : "查货结果已经整理好，可以立即作为下一条消息通知用户。",
+        ? "异步任务结果已经整理好，等待当前同步回复结束后再通知用户。"
+        : "异步任务结果已经整理好，可以立即作为下一条消息通知用户。",
       extra: {
         result,
         completedAt: Date.now(),
@@ -1068,7 +1591,7 @@ export default function App() {
     });
 
     if (!syncTurnInFlightRef.current) {
-      flushAsyncTaskNotification(task.id);
+      await maybeFlushAsyncTaskNotifications();
     }
   }
 
@@ -1542,7 +2065,7 @@ export default function App() {
       await runAssistantRequest(targetMessages, payload, successTitle, successText);
     } finally {
       syncTurnInFlightRef.current = false;
-      maybeFlushAsyncTaskNotifications();
+      await maybeFlushAsyncTaskNotifications();
     }
   }
 
@@ -1594,20 +2117,74 @@ export default function App() {
         const nextTask = buildSupermarketTask(decision, userMessage);
         addAsyncTask(nextTask);
         appendRawOutput(
-          `----- async task created -----\n${nextTask.id}\nintent: ${nextTask.intent}\nitem: ${nextTask.item}\nstore: ${nextTask.store}`,
+          `----- async task created -----\n${nextTask.id}\nintent: ${nextTask.intent}\ntitle: ${nextTask.title}\nsubtitle: ${nextTask.subtitle}`,
         );
         void runAsyncTaskLifecycle(nextTask);
         setStatusBox(
           "warning",
           "查货任务已派发",
-          "check_supermarket_stock 已被编排层转换为异步任务。当前轮会先同步确认，右侧异步任务侧边栏会每 3 秒更新一次进度。",
+          "check_supermarket_stock 已被编排层转换为异步任务。当前轮会先同步确认，右侧异步任务侧边栏会每 20 秒推进到下一个状态。",
         );
-        const payload = buildSupermarketDispatchPayload(form, userTurnMessages, nextTask);
+        const payload = buildAsyncTaskDispatchPayload(form, userTurnMessages, nextTask);
         await runSynchronousAssistantTurn(
           messagesWithIntent,
           payload,
           "查货任务已接受",
           "同步确认已经返回；查货仍在后台处理中，完成后会作为下一条 assistant 消息合流回来。",
+        );
+        return;
+      }
+
+      if (decision.name === TOOL_NAMES.BOOK_RESTAURANT_TABLE) {
+        const nextTask = buildRestaurantBookingTask(decision, userMessage);
+        addAsyncTask(nextTask);
+        appendRawOutput(
+          `----- async task created -----\n${nextTask.id}\nintent: ${nextTask.intent}\ntitle: ${nextTask.title}\nsubtitle: ${nextTask.subtitle}`,
+        );
+        void runAsyncTaskLifecycle(nextTask);
+        setStatusBox(
+          "warning",
+          "餐厅订座任务已派发",
+          "book_restaurant_table 已被编排层转换为异步任务。当前轮会先同步确认，右侧异步任务侧边栏会每 20 秒推进到下一个状态。",
+        );
+        const payload = buildAsyncTaskDispatchPayload(form, userTurnMessages, nextTask);
+        await runSynchronousAssistantTurn(
+          messagesWithIntent,
+          payload,
+          "餐厅订座任务已接受",
+          "同步确认已经返回；餐厅订座仍在后台处理中，完成后会作为下一条 assistant 消息合流回来。",
+        );
+        return;
+      }
+
+      if (decision.name === TOOL_NAMES.QUERY_ASYNC_TASK_STATUS) {
+        const response = buildAsyncTaskStatusQueryResponse(asyncTasksRef.current);
+        setMessages([
+          ...messagesWithIntent,
+          {
+            role: MESSAGE_ROLES.ASSISTANT,
+            content: response.content,
+          },
+        ]);
+        appendRawOutput(
+          `----- async status query -----\n${JSON.stringify(asyncTasksRef.current, null, 2)}\n----- async status response -----\n${response.content}`,
+        );
+        for (const taskId of response.taskIdsToMarkNotified) {
+          updateAsyncTask(
+            taskId,
+            ASYNC_TASK_STATUS.NOTIFIED,
+            100,
+            "用户主动查询任务状态后，结果已在汇总消息里直接通知。",
+            {
+              pendingMerge: false,
+              notifiedAt: Date.now(),
+            },
+          );
+        }
+        setStatusBox(
+          "ok",
+          "任务状态已返回",
+          "当前轮没有走主聊天模型，而是直接读取本地异步任务队列并汇总输出所有任务状态。",
         );
         return;
       }
@@ -1737,8 +2314,7 @@ export default function App() {
         <p className="hero-copy">
           这个页面把灵矽当前更常见的链路搬到了前端：先跑独立 intent 模型决定
           <code>get_weather</code> / <code>get_time</code> / <code>check_supermarket_stock</code> /
-          <code>continue_chat</code>。天气和时间走同步链路；如果命中
-          <code>check_supermarket_stock</code>，编排层会派发异步查货任务，右侧实时展示进度，并在当前同步回复结束后把查货结果作为下一条消息合流回来。
+          <code>book_restaurant_table</code> / <code>continue_chat</code>。天气和时间走同步链路；如果命中异步意图，编排层会派发查货或餐厅订座任务，右侧实时展示进度，并在当前同步回复结束后把结果作为下一条消息合流回来。
         </p>
       </header>
 
@@ -1881,9 +2457,19 @@ export default function App() {
                   <label className="toggle-item">
                     <input
                       type="checkbox"
-                      checked={form.toolEnabledWeather}
+                      checked={form[FORM_KEYS.TOOL_ENABLED_RESTAURANT_BOOKING]}
                       onChange={(event) =>
-                        updateForm("toolEnabledWeather", event.target.checked)
+                        updateForm(FORM_KEYS.TOOL_ENABLED_RESTAURANT_BOOKING, event.target.checked)
+                      }
+                    />
+                    <span>{TOOL_NAMES.BOOK_RESTAURANT_TABLE}</span>
+                  </label>
+                  <label className="toggle-item">
+                    <input
+                      type="checkbox"
+                      checked={form[FORM_KEYS.TOOL_ENABLED_WEATHER]}
+                      onChange={(event) =>
+                        updateForm(FORM_KEYS.TOOL_ENABLED_WEATHER, event.target.checked)
                       }
                     />
                     <span>{TOOL_NAMES.GET_WEATHER}</span>
@@ -1891,17 +2477,17 @@ export default function App() {
                   <label className="toggle-item">
                     <input
                       type="checkbox"
-                      checked={form.toolEnabledTime}
-                      onChange={(event) => updateForm("toolEnabledTime", event.target.checked)}
+                      checked={form[FORM_KEYS.TOOL_ENABLED_TIME]}
+                      onChange={(event) => updateForm(FORM_KEYS.TOOL_ENABLED_TIME, event.target.checked)}
                     />
                     <span>{TOOL_NAMES.GET_TIME}</span>
                   </label>
                   <label className="toggle-item">
                     <input
                       type="checkbox"
-                      checked={form.toolEnabledSupermarketStock}
+                      checked={form[FORM_KEYS.TOOL_ENABLED_SUPERMARKET_STOCK]}
                       onChange={(event) =>
-                        updateForm("toolEnabledSupermarketStock", event.target.checked)
+                        updateForm(FORM_KEYS.TOOL_ENABLED_SUPERMARKET_STOCK, event.target.checked)
                       }
                     />
                     <span>{TOOL_NAMES.CHECK_SUPERMARKET_STOCK}</span>
@@ -1978,17 +2564,23 @@ export default function App() {
               </div>
 
               <div className="chip-row">
-                {form.toolEnabledWeather ? (
+                {form[FORM_KEYS.TOOL_ENABLED_RESTAURANT_BOOKING] ? (
+                  <span className="chip">
+                    异步意图: {TOOL_NAMES.BOOK_RESTAURANT_TABLE}
+                  </span>
+                ) : null}
+                {form[FORM_KEYS.TOOL_ENABLED_WEATHER] ? (
                   <span className="chip">注册工具: {TOOL_NAMES.GET_WEATHER}</span>
                 ) : null}
-                {form.toolEnabledTime ? (
+                {form[FORM_KEYS.TOOL_ENABLED_TIME] ? (
                   <span className="chip">注册工具: {TOOL_NAMES.GET_TIME}</span>
                 ) : null}
-                {form.toolEnabledSupermarketStock ? (
+                {form[FORM_KEYS.TOOL_ENABLED_SUPERMARKET_STOCK] ? (
                   <span className="chip">
                     异步意图: {TOOL_NAMES.CHECK_SUPERMARKET_STOCK}
                   </span>
                 ) : null}
+                <span className="chip">状态查询: {TOOL_NAMES.QUERY_ASYNC_TASK_STATUS}</span>
                 <span className="chip">兜底工具: {TOOL_NAMES.CONTINUE_CHAT}</span>
                 <span className="chip">Mock Delay: {TOOL_DELAY_MS}ms</span>
               </div>
@@ -1997,7 +2589,7 @@ export default function App() {
                 当前灵矽里，天气和时间这类信息工具更常见的返回方式是
                 <code>Action.REQLLM</code>，也就是工具先产出原始结果，再交还给主 LLM
                 组织用户最终会听到的回复。这个 demo 里，天气和时间服务本身由前端 JS
-                直接模拟；<code>check_supermarket_stock</code> 不走同步 tool，而是由编排层转成异步任务。
+                直接模拟；<code>check_supermarket_stock</code> 和 <code>book_restaurant_table</code> 不走同步 tool，而是由编排层转成异步任务；<code>query_async_task_status</code> 则直接汇总本地任务队列里的所有任务状态。
                 Intent 这一栏如果留空，会自动复用主模型的 Base URL、API Key 和 Model。
               </p>
             </section>
@@ -2066,7 +2658,7 @@ export default function App() {
               <textarea
                 id="userInput"
                 value={form.userInput}
-                placeholder="输入一条消息，例如：帮我查一下附近超市有没有无糖酸奶"
+                placeholder="输入一条消息，例如：帮我订一下今晚 7 点两个人的烤肉店"
                 onChange={(event) => updateForm("userInput", event.target.value)}
               />
             </div>
@@ -2110,8 +2702,8 @@ export default function App() {
                         >
                           <div className="task-card-top">
                             <div>
-                              <div className="task-title">{task.item}</div>
-                              <div className="task-subtitle">{task.store}</div>
+                              <div className="task-title">{task.title}</div>
+                              <div className="task-subtitle">{task.subtitle}</div>
                             </div>
                             <div className="task-head-actions">
                               <span className={`task-status task-status-${task.status}`}>
@@ -2153,7 +2745,7 @@ export default function App() {
                             </div>
                             {task.result ? (
                               <div className="task-result-preview">
-                                <div className="task-result-label">最终查货结果</div>
+                                <div className="task-result-label">最终任务结果</div>
                                 <div className="task-result-text">{task.result}</div>
                               </div>
                             ) : null}
@@ -2165,7 +2757,7 @@ export default function App() {
                 </div>
               ) : (
                 <div className="task-empty">
-                  当前还没有异步任务。你可以试试说“帮我查一下附近超市有没有无糖酸奶”，观察同步确认和异步合流是怎么分开的。
+                  当前还没有异步任务。你可以试试说“帮我查一下附近超市有没有无糖酸奶”或“帮我订一下今晚 7 点两个人的烤肉店”，观察同步确认和异步合流是怎么分开的。
                 </div>
               )}
             </section>

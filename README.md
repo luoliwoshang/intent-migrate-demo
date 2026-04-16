@@ -20,12 +20,16 @@ npm run dev
 - 默认 `model` 为 `gpt-5.4`
 - 主模型和 Intent 模型都支持直接修改各自的 `Base URL`，可切到任意 OpenAI-compatible 服务
 - 支持单独配置一个 intent 模型
-- 支持前置 intent tools 判定：`get_weather` / `get_time` / `check_supermarket_stock` / `continue_chat`
-- 支持在左侧动态开关 `get_weather` / `get_time` / `check_supermarket_stock`，关闭后不会再带进 intent 请求的 `tools`
+- 支持前置 intent tools 判定：`get_weather` / `get_time` / `check_supermarket_stock` / `book_restaurant_table` / `query_async_task_status` / `continue_chat`
+- 支持在左侧动态开关 `get_weather` / `get_time` / `check_supermarket_stock` / `book_restaurant_table`，关闭后不会再带进 intent 请求的 `tools`
 - 支持前置 intent 命中 `check_supermarket_stock` 后，由编排层派发异步超市查货任务
+- 支持前置 intent 命中 `book_restaurant_table` 后，由编排层派发异步餐厅订座任务
+- 支持前置 intent 命中 `query_async_task_status` 后，直接汇总本地异步任务队列里的所有任务状态
 - 支持前端 JS 直接模拟天气 / 时间服务，固定延迟 `5s`
-- 异步查货任务会按 `accepted -> processing -> finalizing -> completed -> notified` 推进，并每 `3s` 更新一次前端进度
-- 如果异步查货在同步回复尚未结束时完成，会先排队，等当前同步回复结束后再作为下一条 assistant 消息合流
+- 异步任务会按 `accepted -> processing -> finalizing -> completed -> notified` 推进，并每 `20s` 推进到下一个阶段
+- 当前支持两类异步任务：超市查货、餐厅订座
+- 如果异步任务在同步回复尚未结束时完成，会先排队，等当前同步回复结束后再作为下一条 assistant 消息合流
+- 如果同一时刻有多条已完成但未通知的异步任务，demo 会再调一次主 LLM，把它们合并成一条统一回复
 - 右侧提供独立“异步任务侧边栏”，每个任务项都支持展开 / 收起查看进度详情
 - 当前 demo 用本地 mock callback 模拟“tool 主动上报异步任务状态”，还没有接真实 HTTP 通知接口
 - 支持两种工具结果路径：
